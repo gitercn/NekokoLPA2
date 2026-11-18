@@ -233,11 +233,11 @@ class PhoenixLink {
 
   static List<String> _queryDosDevicePorts() {
     const int bufChars = 65536;
-    final buf = calloc<Uint16>(bufChars);
+    final buf = calloc<Utf16>(bufChars);
     try {
       final len = _queryDosDeviceW(nullptr, buf, bufChars);
       if (len == 0) return const [];
-      final units = buf.asTypedList(len);
+      final units = buf.cast<Uint16>().asTypedList(len);
       final out = <String>[];
       var start = 0;
       for (var i = 0; i < len; i++) {

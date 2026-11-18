@@ -44,7 +44,24 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build Windows release
-        run: flutter build windows --release --dart-define=APP_VARIANT=std
+        shell: pwsh
+        run: |
+          $log = "build-windows.log"
+          flutter build windows --release --dart-define=APP_VARIANT=std 2>&1 |
+            Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            # Surface compiler errors as annotations: the raw job log needs a
+            # signed-in session to read, annotations do not.
+            $hits = Select-String -Path $log `
+              -Pattern 'Error:|error:|Error |FAILED|Exception' |
+              Select-Object -First 15
+            foreach ($h in $hits) {
+              $msg = $h.Line.Trim()
+              if ($msg.Length -gt 500) { $msg = $msg.Substring(0, 500) }
+              Write-Host "::error file=build-windows.log,line=1::$msg"
+            }
+            exit 1
+          }
 
       - name: Package
         shell: pwsh
