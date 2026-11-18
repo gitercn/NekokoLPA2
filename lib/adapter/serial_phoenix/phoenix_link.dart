@@ -330,6 +330,30 @@ class PhoenixLink {
     return b[0];
   }
 
+  /// After a case-4 data field the card either returns Le bytes followed by
+  /// SW1SW2, or a bare status word (very common: 61xx / 9000).
+  Uint8List _readResponseBody(int le) {
+    final first = _port.read(1, 6000);
+    if (first.isEmpty) return Uint8List(0);
+    final b = first[0];
+    final hi = b & 0xF0;
+    if (b == 0x61 ||
+        hi == 0x60 ||
+        hi == 0x90 ||
+        hi == 0x62 ||
+        hi == 0x63 ||
+        hi == 0x6A ||
+        hi == 0x6B ||
+        hi == 0x6C ||
+        hi == 0x6D ||
+        hi == 0x6E ||
+        hi == 0x6F) {
+      return Uint8List.fromList([b, ..._port.read(1, 1500)]);
+    }
+    final rest = _port.read(le - 1, 6000);
+    return Uint8List.fromList([b, ...rest, ..._port.read(2, 2000)]);
+  }
+
   /// One T=0 transaction (ISO 7816-3). Handles case 1/2/3/4.
   Future<Uint8List> transceive(Uint8List apdu) async {
     if (apdu.length < 5) {
@@ -337,7 +361,14 @@ class PhoenixLink {
     }
     final ins = apdu[1];
     final p3 = apdu[4];
-    final hasData = apdu.length > 5;
+    final bodyLen = apdu.length - 5;
+    // A case-4 APDU may append a Le byte after Lc data bytes. T=0 carries Le
+    // in the header, so that trailing byte must NOT be transmitted: one extra
+    // byte makes the card read past Lc, desynchronise, and from then on every
+    // answer is garbage (typically a fragment of the ATR).
+    final lc = p3 <= bodyLen ? p3 : bodyLen;
+    final hasData = lc > 0;
+    final le = bodyLen > p3 ? apdu[5 + p3] : 0;
 
     await _txBytes(Uint8List.sublistView(apdu, 0, 5));
 
@@ -345,7 +376,8 @@ class PhoenixLink {
     if (hasData) {
       final pb = await _firstResponseByte();
       if (pb == ins) {
-        await _txBytes(Uint8List.sublistView(apdu, 5));
+        await _txBytes(Uint8List.sublistView(apdu, 5, 5 + lc));
+        if (le > 0) return _readResponseBody(le);
         return _port.read(2, 5000);
       }
       return Uint8List.fromList([pb, ..._port.read(1, 900)]);
