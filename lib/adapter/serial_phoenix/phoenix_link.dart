@@ -272,26 +272,33 @@ class PhoenixLink {
   Future<void> _delay(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
 
   /// RTS is wired to RST on a Phoenix reader: assert, release, read the ATR.
+  ///
+  /// The timings mirror the Python prototype that is known to work on this
+  /// hardware (300 ms power settle, 300 ms reset pulse, then read until the
+  /// line has been quiet for ~700 ms). A short pulse leaves some eUICCs in a
+  /// half-reset state where they still emit an ATR but ignore every APDU.
   Future<Uint8List> reset() async {
     _port.setRts(false);
     _port.setDtr(false);
-    await _delay(120);
+    await _delay(300);
     _port.purgeInput();
     _port.setRts(true);
-    await _delay(120);
+    await _delay(300);
     _port.purgeInput();
     _port.setRts(false);
-    await _delay(450);
 
     final atr = <int>[];
-    final deadline = DateTime.now().add(const Duration(milliseconds: 1200));
+    var quiet = 0;
+    final deadline = DateTime.now().add(const Duration(milliseconds: 3000));
     while (DateTime.now().isBefore(deadline)) {
-      final chunk = _port.read(64, 120);
+      final chunk = _port.read(64, 60);
       if (chunk.isEmpty) {
-        if (atr.isNotEmpty) break; // line went quiet: ATR complete
-        continue;
+        quiet++;
+        if (atr.isNotEmpty && quiet > 12) break; // ~700 ms of silence
+      } else {
+        atr.addAll(chunk);
+        quiet = 0;
       }
-      atr.addAll(chunk);
     }
     return Uint8List.fromList(atr);
   }
@@ -300,7 +307,7 @@ class PhoenixLink {
   /// byte comes back and has to be drained before the card answers.
   Future<void> _txByte(int value) async {
     _port.writeByte(value);
-    final echo = _port.read(1, 150);
+    final echo = _port.read(1, 300);
     if (echo.length != 1 || echo[0] != value) echoErrors++;
   }
 

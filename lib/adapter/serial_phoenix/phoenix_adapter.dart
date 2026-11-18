@@ -64,6 +64,9 @@ class PhoenixAdapter extends BaseAdapter {
       }
       _link = link;
       _lastAtr = HexUtils.bytesToHex(atr);
+      // The card needs a moment after the ATR before it accepts the first
+      // APDU; without this settle the first command is silently dropped.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       updateConnectedReader(reader);
       _state.add(EuiccPortState.open);
       _logger.info('Phoenix reader ${reader.name} ready, ATR=$_lastAtr');
