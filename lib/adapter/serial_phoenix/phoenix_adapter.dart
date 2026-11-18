@@ -138,19 +138,40 @@ class PhoenixAdapter extends BaseAdapter {
       final sw1 = rsp[rsp.length - 2];
       final sw2 = rsp[rsp.length - 1];
 
-      // Le rejected: the card tells us the length it wants.
+      // Le rejected: the card tells us the length it wants. Rebuild the APDU
+      // keeping the data field intact -- for case 4 the trailing byte is Le,
+      // not data, and blindly replacing it corrupts the command (which makes
+      // this card go silent until it is power-cycled).
       if (sw1 == 0x6C) {
-        cmd = Uint8List.fromList([...apdu.sublist(0, 4), sw2]);
+        final bodyLen = apdu.length - 5;
+        final lc = apdu[4];
+        if (bodyLen > 0 && lc <= bodyLen) {
+          cmd = Uint8List.fromList([
+            ...apdu.sublist(0, 5),
+            ...apdu.sublist(5, 5 + lc),
+            sw2,
+          ]);
+        } else {
+          cmd = Uint8List.fromList([...apdu.sublist(0, 4), sw2]);
+        }
         continue;
       }
 
       // More data available: chain GET RESPONSE until it is drained.
       if (sw1 == 0x61) {
+        // GET RESPONSE has to carry the same logical channel as the command.
+        // Channels 0-3 sit in the low two bits of CLA (0x01 for channel 1);
+        // 4-19 use 0x40 | (ch - 4). Sending CLA 0x00 here makes the card
+        // answer on channel 0 and return 6F00 instead of the data.
+        final int grCla = (apdu[0] & 0x40) != 0
+            ? (apdu[0] & 0x4F)
+            : (apdu[0] & 0x03);
+
         var body = rsp.sublist(0, rsp.length - 2);
         var remaining = sw2;
         while (remaining > 0) {
           final more = await link.transceive(
-            Uint8List.fromList([0x00, 0xC0, 0x00, 0x00, remaining]),
+            Uint8List.fromList([grCla, 0xC0, 0x00, 0x00, remaining]),
           );
           if (more.length < 2) break;
           body = Uint8List.fromList(
