@@ -330,15 +330,37 @@ class PhoenixLink {
     return b[0];
   }
 
+  /// SW1SW2, skipping the T=0 NULL bytes (0x60) a busy card keeps sending.
+  ///
+  /// A chunked STORE DATA (AuthenticateServer, LoadBoundProfilePackage) can
+  /// take hundreds of milliseconds per block. Treating those NULLs as a
+  /// status word aborts a transaction the card is still waiting to finish,
+  /// which desynchronises the link until the reader is physically replugged.
+  Uint8List _readStatusWord({int timeoutMs = 8000}) {
+    int? sw1;
+    final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+    while (DateTime.now().isBefore(deadline)) {
+      final b = _port.read(1, 400);
+      if (b.isEmpty) continue;
+      if (sw1 == null) {
+        if (b[0] == 0x60) continue; // NULL: card is still working
+        sw1 = b[0];
+      } else {
+        return Uint8List.fromList([sw1, b[0]]);
+      }
+    }
+    return sw1 == null ? Uint8List(0) : Uint8List.fromList([sw1]);
+  }
+
   /// After a case-4 data field the card either returns Le bytes followed by
   /// SW1SW2, or a bare status word (very common: 61xx / 9000).
   Uint8List _readResponseBody(int le) {
     final first = _port.read(1, 6000);
     if (first.isEmpty) return Uint8List(0);
     final b = first[0];
+    if (b == 0x60) return _readStatusWord(); // busy: no data coming
     final hi = b & 0xF0;
     if (b == 0x61 ||
-        hi == 0x60 ||
         hi == 0x90 ||
         hi == 0x62 ||
         hi == 0x63 ||
@@ -351,7 +373,7 @@ class PhoenixLink {
       return Uint8List.fromList([b, ..._port.read(1, 1500)]);
     }
     final rest = _port.read(le - 1, 6000);
-    return Uint8List.fromList([b, ...rest, ..._port.read(2, 2000)]);
+    return Uint8List.fromList([b, ...rest, ..._readStatusWord()]);
   }
 
   /// One T=0 transaction (ISO 7816-3). Handles case 1/2/3/4.
@@ -388,7 +410,7 @@ class PhoenixLink {
       if (pb == ins) {
         await _txBytes(Uint8List.sublistView(apdu, 5, 5 + lc));
         if (le > 0) return _readResponseBody(le);
-        return _port.read(2, 5000);
+        return _readStatusWord();
       }
       return Uint8List.fromList([pb, ..._port.read(1, 900)]);
     }
@@ -398,12 +420,12 @@ class PhoenixLink {
     final first = await _firstResponseByte();
     if (first == ins) {
       final body = _port.read(p3, 5000);
-      return Uint8List.fromList([...body, ..._port.read(2, 2000)]);
+      return Uint8List.fromList([...body, ..._readStatusWord()]);
     }
     if (p3 == 0) {
       return Uint8List.fromList([first, ..._port.read(1, 900)]);
     }
     final body = Uint8List.fromList([first, ..._port.read(p3 - 1, 5000)]);
-    return Uint8List.fromList([...body, ..._port.read(2, 2000)]);
+    return Uint8List.fromList([...body, ..._readStatusWord()]);
   }
 }
