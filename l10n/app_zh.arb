@@ -64,6 +64,8 @@
   "remoteReaderSettingsSubtitle": "配置远程读卡器服务器和连接",
   "ccidReaderTitle": "CCID（USB/PC/SC）",
   "ccidReaderSubtitle": "USB智能卡读卡器和PC/SC设备",
+  "phoenixReaderTitle": "凤凰串口读卡器",
+  "phoenixReaderSubtitle": "COM 口上的 Phoenix/Smartmouse 读卡器（PL2303、CH340）",
   "bluetoothReaderTitle": "蓝牙",
   "bluetoothReaderSubtitle": "蓝牙LE智能卡读卡器和写卡器",
   "remoteReadersTitle": "远程读卡器",

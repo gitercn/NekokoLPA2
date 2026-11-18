@@ -1,0 +1,62 @@
+name: Build Windows (dev)
+
+# Standalone Windows build for testing a working tree without a local Flutter
+# install. Kept separate from build.yml so it does not pull in the Android /
+# iOS / release jobs.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+
+env:
+  # Must match the toolchain pinned in build.yml.
+  FLUTTER_VERSION: 3.47.2
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Toolchain versions
+        run: |
+          flutter --version
+          cargo --version
+          rustc --version
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Generate localizations
+        run: flutter gen-l10n
+
+      # Reported but never blocks the build: the point of this workflow is an
+      # artefact to test, not a clean lint run.
+      - name: Analyze
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build Windows release
+        run: flutter build windows --release --dart-define=APP_VARIANT=std
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $stamp = Get-Date -Format "yyyyMMdd-HHmm"
+          Compress-Archive -Path build\windows\x64\runner\Release\* `
+            -DestinationPath "dist\nlpa2-windows-dev-$stamp.zip" -Force
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nlpa2-windows-dev
+          path: dist/*.zip
+          retention-days: 14
