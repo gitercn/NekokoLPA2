@@ -362,6 +362,16 @@ class PhoenixLink {
     final ins = apdu[1];
     final p3 = apdu[4];
     final bodyLen = apdu.length - 5;
+    // Refuse anything that is not a well-formed case 3/4. A body that is
+    // neither Lc nor Lc+1 bytes long would make the card read past Lc, and
+    // this reader has no way to power-cycle the card afterwards -- only a
+    // physical replug brings it back. Better to fail loudly here.
+    if (bodyLen > 0 && bodyLen != p3 && bodyLen != p3 + 1) {
+      throw PhoenixException(
+        'malformed APDU: Lc=$p3 but $bodyLen data bytes '
+        '(refusing to send: it wedges the card until it is replugged)',
+      );
+    }
     // A case-4 APDU may append a Le byte after Lc data bytes. T=0 carries Le
     // in the header, so that trailing byte must NOT be transmitted: one extra
     // byte makes the card read past Lc, desynchronise, and from then on every

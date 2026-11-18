@@ -59,8 +59,11 @@ class PhoenixAdapter extends BaseAdapter {
       final atr = await link.reset();
       if (atr.isEmpty || (atr[0] != 0x3B && atr[0] != 0x3F)) {
         throw PhoenixException(
-            '${reader.name}: no ATR (card not inserted, or the reader is in '
-            'Smartmouse mode instead of Phoenix mode)');
+          '${reader.name}: no ATR -- the card did not answer. Check that the '
+          'card is seated and the switch is set to 19200; if it worked before, '
+          'unplug and replug the reader (this reader cannot power-cycle the '
+          'card from software).',
+        );
       }
       _link = link;
       _lastAtr = HexUtils.bytesToHex(atr);
@@ -187,7 +190,8 @@ class PhoenixAdapter extends BaseAdapter {
 
     throw PhoenixException(
       'APDU failed after 3 attempts: $lastError '
-      '(echoErrors=${link.echoErrors})',
+      '(echoErrors=${link.echoErrors}). If the card stays silent, unplug and '
+      'replug the reader -- it has no software power cycle.',
     );
   }
 }
