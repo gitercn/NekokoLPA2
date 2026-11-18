@@ -68,6 +68,36 @@ class _Win32Serial {
           Uint32 Function(Pointer<Utf16>, Pointer<Utf16>, Uint32),
           int Function(Pointer<Utf16>, Pointer<Utf16>, int)>('QueryDosDeviceW');
 
+  static final RegExp _comPattern = RegExp(r'^COM\d+$');
+
+  /// COM ports present on the system, straight from the object-manager
+  /// namespace. Unlike an open-probe this also reports ports that another
+  /// process currently holds open.
+  static List<String> comPorts() {
+    const int bufChars = 65536;
+    final raw = calloc<Uint16>(bufChars);
+    try {
+      final len = _queryDosDeviceW(nullptr, raw.cast<Utf16>(), bufChars);
+      if (len == 0) return const [];
+      final units = raw.asTypedList(len);
+      final out = <String>[];
+      var start = 0;
+      for (var i = 0; i < len; i++) {
+        if (units[i] != 0) continue;
+        if (i > start) {
+          final name = String.fromCharCodes(units, start, i);
+          if (_comPattern.hasMatch(name)) out.add(name);
+        }
+        start = i + 1;
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    } finally {
+      calloc.free(raw);
+    }
+  }
+
   static const int _genericRead = 0x80000000;
   static const int _genericWrite = 0x40000000;
   static const int _openExisting = 3;
@@ -209,7 +239,7 @@ class PhoenixLink {
     // even when another process (VMware, a terminal) holds the port open, so
     // the port still shows up and the user gets a clear "cannot open" instead
     // of a silently empty list.
-    final named = _queryDosDevicePorts();
+    final named = _Win32Serial.comPorts();
     if (named.isNotEmpty) {
       named.sort((a, b) =>
           int.parse(a.substring(3)).compareTo(int.parse(b.substring(3))));
@@ -227,33 +257,6 @@ class PhoenixLink {
       }
     }
     return found;
-  }
-
-  static final RegExp _comPattern = RegExp(r'^COM\d+$');
-
-  static List<String> _queryDosDevicePorts() {
-    const int bufChars = 65536;
-    final buf = calloc<Utf16>(bufChars);
-    try {
-      final len = _queryDosDeviceW(nullptr, buf, bufChars);
-      if (len == 0) return const [];
-      final units = buf.cast<Uint16>().asTypedList(len);
-      final out = <String>[];
-      var start = 0;
-      for (var i = 0; i < len; i++) {
-        if (units[i] != 0) continue;
-        if (i > start) {
-          final name = String.fromCharCodes(units, start, i);
-          if (_comPattern.hasMatch(name)) out.add(name);
-        }
-        start = i + 1;
-      }
-      return out;
-    } catch (_) {
-      return const [];
-    } finally {
-      calloc.free(buf);
-    }
   }
 
   static PhoenixLink open(String portName, {int baud = defaultBaud}) {
