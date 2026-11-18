@@ -44,7 +44,7 @@ Measured on a test eUICC with the app's serial adapter:
 
 | Step | Result |
 |---|---|
-| ATR | `returned, 23 bytes (T=0)` |
+| ATR | returned, 23 bytes (T=0) |
 | SELECT ISD-R | `9000`, 33-byte FCI |
 | GetEID / Info2 / Configured addresses | `9000` |
 | AuthenticateServer (830 B, 6 blocks) | `authenticateResponseOk`, ~2.7 s |
