@@ -313,9 +313,9 @@ class PhoenixLink {
   /// First non-NULL byte after a header: either the procedure byte (INS) or
   /// the first byte of the card's answer.
   Future<int> _firstResponseByte() async {
-    var b = _port.read(1, 900);
+    var b = _port.read(1, 1500);
     while (b.isNotEmpty && b[0] == 0x60) {
-      b = _port.read(1, 900); // NULL: card is still working
+      b = _port.read(1, 1500); // NULL: card is still working
     }
     if (b.isEmpty) {
       throw PhoenixException('no response byte (echoErrors=$echoErrors)');

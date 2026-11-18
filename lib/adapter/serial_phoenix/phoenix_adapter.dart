@@ -103,9 +103,34 @@ class PhoenixAdapter extends BaseAdapter {
     }
 
     var cmd = apdu;
+    Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
-      final rsp = await link.transceive(cmd);
-      if (rsp.length < 2) continue;
+      Uint8List rsp;
+      try {
+        rsp = await link.transceive(cmd);
+      } catch (e) {
+        lastError = e;
+        _logger.fine('APDU tx=${HexUtils.bytesToHex(apdu)} -> $e');
+        // A silent card usually means it lost its supply or was reset by
+        // line noise. Re-run the reset sequence before the next attempt.
+        if (attempt < 2) {
+          try {
+            final atr = await link.reset();
+            _logger.fine('Recovery reset, ATR=${HexUtils.bytesToHex(atr)}');
+          } catch (_) {
+            // keep the original error
+          }
+        }
+        continue;
+      }
+
+      _logger.fine(
+        'APDU tx=${HexUtils.bytesToHex(apdu)} rx=${HexUtils.bytesToHex(rsp)}',
+      );
+      if (rsp.length < 2) {
+        lastError = 'short response (${rsp.length} bytes)';
+        continue;
+      }
 
       final sw1 = rsp[rsp.length - 2];
       final sw2 = rsp[rsp.length - 1];
@@ -137,7 +162,8 @@ class PhoenixAdapter extends BaseAdapter {
     }
 
     throw PhoenixException(
-      'APDU failed after 3 attempts (echoErrors=${link.echoErrors})',
+      'APDU failed after 3 attempts: $lastError '
+      '(echoErrors=${link.echoErrors})',
     );
   }
 }
