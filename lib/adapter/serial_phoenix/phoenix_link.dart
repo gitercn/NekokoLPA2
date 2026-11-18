@@ -382,7 +382,10 @@ class PhoenixLink {
       throw PhoenixException('APDU shorter than 5 bytes');
     }
     final ins = apdu[1];
-    final p3 = apdu[4];
+    // GET RESPONSE carries Le, and Le = 0 means 256 bytes (ISO 7816-4). The
+    // card answers "61 00" for a whole 256-byte block, so this matters for
+    // every chunked STORE DATA reply.
+    final p3 = (ins == 0xC0 && apdu[4] == 0) ? 256 : apdu[4];
     final bodyLen = apdu.length - 5;
     // Refuse anything that is not a well-formed case 3/4. A body that is
     // neither Lc nor Lc+1 bytes long would make the card read past Lc, and

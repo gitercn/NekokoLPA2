@@ -171,16 +171,27 @@ class PhoenixAdapter extends BaseAdapter {
             : (apdu[0] & 0x03);
 
         var body = rsp.sublist(0, rsp.length - 2);
-        var remaining = sw2;
-        while (remaining > 0) {
+        // SW2 = 0x00 means 256 bytes available, not zero (ISO 7816-4). A
+        // chunked STORE DATA answers "61 00" for its whole response, so
+        // treating it as empty silently drops the data.
+        var remaining = sw2 == 0 ? 256 : sw2;
+        var guard = 0;
+        while (remaining > 0 && guard++ < 64) {
+          // Le is a single byte: 0 encodes 256.
+          final int le = remaining >= 256 ? 0 : remaining;
           final more = await link.transceive(
-            Uint8List.fromList([grCla, 0xC0, 0x00, 0x00, remaining]),
+            Uint8List.fromList([grCla, 0xC0, 0x00, 0x00, le]),
           );
           if (more.length < 2) break;
           body = Uint8List.fromList(
             [...body, ...more.sublist(0, more.length - 2)],
           );
-          remaining = more[more.length - 2] == 0x61 ? more[more.length - 1] : 0;
+          final moreSw1 = more[more.length - 2];
+          final moreSw2 = more[more.length - 1];
+          if (moreSw1 != 0x61) {
+            return Uint8List.fromList([...body, moreSw1, moreSw2]);
+          }
+          remaining = moreSw2 == 0 ? 256 : moreSw2;
         }
         return Uint8List.fromList([...body, 0x90, 0x00]);
       }
