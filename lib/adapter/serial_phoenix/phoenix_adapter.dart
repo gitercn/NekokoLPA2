@@ -182,6 +182,10 @@ class PhoenixAdapter extends BaseAdapter {
           final more = await link.transceive(
             Uint8List.fromList([grCla, 0xC0, 0x00, 0x00, le]),
           );
+          _logger.fine(
+            'GET RESPONSE cla=${grCla.toRadixString(16)} le=$le -> '
+            '${HexUtils.bytesToHex(more)}',
+          );
           if (more.length < 2) break;
           body = Uint8List.fromList(
             [...body, ...more.sublist(0, more.length - 2)],

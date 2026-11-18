@@ -47,7 +47,9 @@ jobs:
         shell: pwsh
         run: |
           $log = "build-windows.log"
-          flutter build windows --release --dart-define=APP_VARIANT=std 2>&1 |
+          # Debug build: kDebugMode is true, so the app also mirrors this run's
+          # log to <Documents>\nlpa-session.log (see LogBuffer.startFileLogging).
+          flutter build windows --debug --dart-define=APP_VARIANT=std 2>&1 |
             Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
             # Surface compiler errors as annotations: the raw job log needs a
@@ -68,7 +70,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $stamp = Get-Date -Format "yyyyMMdd-HHmm"
-          Compress-Archive -Path build\windows\x64\runner\Release\* `
+          Compress-Archive -Path build\windows\x64\runner\Debug\* `
             -DestinationPath "dist\nlpa2-windows-dev-$stamp.zip" -Force
           Get-ChildItem dist | Format-Table Name, Length
 
