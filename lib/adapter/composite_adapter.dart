@@ -232,6 +232,8 @@ class CompositeAdapter extends BaseAdapter {
       } catch (e) {
         _log.warning("Phoenix reader list failed: $e");
       }
+    } else {
+      _log.info("Phoenix serial reader connector is disabled in settings");
     }
 
     final useNBridge =

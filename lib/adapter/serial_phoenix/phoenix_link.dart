@@ -63,6 +63,11 @@ class _Win32Serial {
           int Function(int, Pointer<Uint8>, int, Pointer<Uint32>,
               Pointer<Void>)>('WriteFile');
 
+  static final int Function(Pointer<Utf16>, Pointer<Utf16>, int) _queryDosDeviceW =
+      _k32.lookupFunction<
+          Uint32 Function(Pointer<Utf16>, Pointer<Utf16>, Uint32),
+          int Function(Pointer<Utf16>, Pointer<Utf16>, int)>('QueryDosDeviceW');
+
   static const int _genericRead = 0x80000000;
   static const int _genericWrite = 0x40000000;
   static const int _openExisting = 3;
@@ -199,6 +204,19 @@ class PhoenixLink {
   /// not touch DTR/RTS, so an attached device is not disturbed.
   static List<String> availablePorts() {
     if (!Platform.isWindows) return const [];
+
+    // Preferred: ask the object manager for the DOS device list. This works
+    // even when another process (VMware, a terminal) holds the port open, so
+    // the port still shows up and the user gets a clear "cannot open" instead
+    // of a silently empty list.
+    final named = _queryDosDevicePorts();
+    if (named.isNotEmpty) {
+      named.sort((a, b) =>
+          int.parse(a.substring(3)).compareTo(int.parse(b.substring(3))));
+      return named;
+    }
+
+    // Fallback: probe COM1..COM32 by opening each one.
     final found = <String>[];
     for (var i = 1; i <= 32; i++) {
       final name = 'COM$i';
@@ -209,6 +227,33 @@ class PhoenixLink {
       }
     }
     return found;
+  }
+
+  static final RegExp _comPattern = RegExp(r'^COM\d+$');
+
+  static List<String> _queryDosDevicePorts() {
+    const int bufChars = 65536;
+    final buf = calloc<Uint16>(bufChars);
+    try {
+      final len = _queryDosDeviceW(nullptr, buf, bufChars);
+      if (len == 0) return const [];
+      final units = buf.asTypedList(len);
+      final out = <String>[];
+      var start = 0;
+      for (var i = 0; i < len; i++) {
+        if (units[i] != 0) continue;
+        if (i > start) {
+          final name = String.fromCharCodes(units, start, i);
+          if (_comPattern.hasMatch(name)) out.add(name);
+        }
+        start = i + 1;
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    } finally {
+      calloc.free(buf);
+    }
   }
 
   static PhoenixLink open(String portName, {int baud = defaultBaud}) {

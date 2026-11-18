@@ -39,7 +39,10 @@ class PhoenixAdapter extends BaseAdapter {
   Future<List<Reader>> listReaders({bool force = false}) async {
     if (!PlatformX.isWindows) return const [];
     try {
-      return PhoenixLink.availablePorts()
+      final ports = PhoenixLink.availablePorts();
+      _logger.info('Phoenix: serial ports found: '
+          '${ports.isEmpty ? "(none)" : ports.join(", ")}');
+      return ports
           .map((port) => Reader(id: 'phoenix:$port', name: port, source: this))
           .toList();
     } catch (e) {
