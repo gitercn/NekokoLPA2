@@ -116,17 +116,22 @@ class PhoenixAdapter extends BaseAdapter {
       } catch (e) {
         lastError = e;
         _logger.fine('APDU tx=${HexUtils.bytesToHex(apdu)} -> $e');
-        // A silent card usually means it lost its supply or was reset by
-        // line noise. Re-run the reset sequence before the next attempt.
-        if (attempt < 2) {
-          try {
-            final atr = await link.reset();
-            _logger.fine('Recovery reset, ATR=${HexUtils.bytesToHex(atr)}');
-          } catch (_) {
-            // keep the original error
-          }
+        // A silent card usually means it lost its supply or was reset by line
+        // noise. Resetting clears that, but it also closes every logical
+        // channel and clears the selected AID, so the command cannot be
+        // retransmitted unchanged: a logical-channel APDU would come back
+        // 6881, and a basic-channel one would reach the default application.
+        // Propagate instead, so the caller opens a fresh session.
+        try {
+          final atr = await link.reset();
+          _logger.fine('Recovery reset, ATR=${HexUtils.bytesToHex(atr)}');
+        } catch (_) {
+          // keep the original error
         }
-        continue;
+        throw PhoenixException(
+          'APDU failed: $e. The card was reset, so the session has to be '
+          'reopened (echoErrors=${link.echoErrors})',
+        );
       }
 
       _logger.fine(
@@ -174,8 +179,8 @@ class PhoenixAdapter extends BaseAdapter {
         // chunked STORE DATA answers "61 00" for its whole response, so
         // treating it as empty silently drops the data.
         var remaining = sw2 == 0 ? 256 : sw2;
-        var guard = 0;
-        while (remaining > 0 && guard++ < 64) {
+        var blocks = 0;
+        while (true) {
           // Le is a single byte: 0 encodes 256.
           final int le = remaining >= 256 ? 0 : remaining;
           final more = await link.transceive(
@@ -185,7 +190,15 @@ class PhoenixAdapter extends BaseAdapter {
             'GET RESPONSE cla=${grCla.toRadixString(16)} le=$le -> '
             '${HexUtils.bytesToHex(more)}',
           );
-          if (more.length < 2) break;
+          // Never fabricate a status word here: a truncated chain would then
+          // look like a successful response and the caller would decode half
+          // an ASN.1 object.
+          if (more.length < 2) {
+            throw PhoenixException(
+              'GET RESPONSE returned ${more.length} byte(s) with $remaining '
+              'still outstanding; the response is truncated',
+            );
+          }
           body = Uint8List.fromList(
             [...body, ...more.sublist(0, more.length - 2)],
           );
@@ -195,17 +208,41 @@ class PhoenixAdapter extends BaseAdapter {
             return Uint8List.fromList([...body, moreSw1, moreSw2]);
           }
           remaining = moreSw2 == 0 ? 256 : moreSw2;
+          if (++blocks > 64) {
+            throw PhoenixException(
+              'GET RESPONSE chain did not finish after 64 blocks '
+              '($remaining bytes still pending)',
+            );
+          }
         }
-        return Uint8List.fromList([...body, 0x90, 0x00]);
       }
 
       return rsp;
     }
 
     throw PhoenixException(
-      'APDU failed after 3 attempts: $lastError '
-      '(echoErrors=${link.echoErrors}). If the card stays silent, unplug and '
-      'replug the reader -- it has no software power cycle.',
+      'APDU failed: the card kept rejecting Le (lastError=$lastError, '
+      'echoErrors=${link.echoErrors})',
     );
+  }
+
+  /// A profile switch only takes effect once the card is reset: it re-reads
+  /// the active profile at start-up. On a serial reader there is no modem to
+  /// ask for a REFRESH, so toggling RTS is the only way to make the card
+  /// serve the new profile.
+  @override
+  Future<void> resetAfterProfileSwitch() async {
+    final link = _link;
+    if (link == null) return;
+    _logger.info('Resetting the card so it starts serving the new profile');
+    await link.reset();
+  }
+
+  @override
+  Future<void> proactiveRefresh() async {
+    final link = _link;
+    if (link == null) return;
+    _logger.info('Card asked for a REFRESH; resetting it instead');
+    await link.reset();
   }
 }

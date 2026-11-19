@@ -382,10 +382,10 @@ class PhoenixLink {
       throw PhoenixException('APDU shorter than 5 bytes');
     }
     final ins = apdu[1];
-    // GET RESPONSE carries Le, and Le = 0 means 256 bytes (ISO 7816-4). The
-    // card answers "61 00" for a whole 256-byte block, so this matters for
-    // every chunked STORE DATA reply.
-    final p3 = (ins == 0xC0 && apdu[4] == 0) ? 256 : apdu[4];
+    // Le = 0 means 256 bytes (ISO 7816-4) whenever the card acknowledges with
+    // its INS byte, which covers GET RESPONSE and every READ BINARY issued
+    // with Le 00. It is resolved at the point the ACK is seen, below.
+    final p3 = apdu[4];
     final bodyLen = apdu.length - 5;
     // Refuse anything that is not a well-formed case 3/4. A body that is
     // neither Lc nor Lc+1 bytes long would make the card read past Lc, and
@@ -410,6 +410,24 @@ class PhoenixLink {
     // Case 3/4: the card acknowledges with the INS byte before taking data.
     if (hasData) {
       final pb = await _firstResponseByte();
+      if (pb == (ins ^ 0xFF)) {
+        // Complemented INS: the card asks for one data byte at a time, and
+        // acknowledges each byte with the complement of INS. Legal T=0, and
+        // the only way such a card will accept the body.
+        var ack = pb;
+        var sent = 0;
+        while (sent < lc && ack == (ins ^ 0xFF)) {
+          await _txBytes(Uint8List.sublistView(apdu, 5 + sent, 6 + sent));
+          sent++;
+          ack = await _firstResponseByte();
+        }
+        if (sent < lc) {
+          // The card stopped early; ack is already the first status byte.
+          return Uint8List.fromList([ack, ..._port.read(1, 900)]);
+        }
+        if (le > 0) return _readResponseBody(le);
+        return _readStatusWord();
+      }
       if (pb == ins) {
         await _txBytes(Uint8List.sublistView(apdu, 5, 5 + lc));
         if (le > 0) return _readResponseBody(le);
@@ -422,7 +440,8 @@ class PhoenixLink {
     // straight away -- so the first byte is data, not a procedure byte.
     final first = await _firstResponseByte();
     if (first == ins) {
-      final body = _port.read(p3, 5000);
+      // The ACK means the data field follows, so Le = 0 is 256 bytes here.
+      final body = _port.read(p3 == 0 ? 256 : p3, 5000);
       return Uint8List.fromList([...body, ..._readStatusWord()]);
     }
     if (p3 == 0) {
